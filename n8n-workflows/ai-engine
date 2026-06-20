@@ -1,0 +1,194 @@
+{
+  "name": "My workflow 3",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "period"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -784,
+        128
+      ],
+      "id": "685f8a9f-ed5b-4831-9c51-8ff789c388e4",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "const period = $input.first().json.period || 'Week';\nconst now = new Date();\nlet dateFrom = new Date();\nlet dateTo = new Date();\n\n// --- ВАШИ РАБОЧИЕ УСЛОВИЯ (НЕ МЕНЯЛИСЬ) ---\nif (period === 'Month') {\n    dateFrom = new Date(now.getFullYear(), now.getMonth(), 1);\n} else if (period === 'Week') {\n    dateFrom.setDate(now.getDate() - 7);\n    \n// --- ИСПРАВЛЕНИЕ ДЛЯ TODAY ---\n} else if (period === 'Today') {\n    // Устанавливаем dateFrom на начало сегодняшнего дня (00:00:00)\n    dateFrom.setHours(0, 0, 0, 0); \n    // dateTo остается текущим временем, так что dateFrom теперь точно МЕНЬШЕ, чем dateTo\n\n// --- ДЛЯ НОВОГО КАЛЕНДАРЯ (JSON-СТРОКА) ---\n} else if (period.startsWith('{') || period.includes('period')) {\n    try {\n        const calendarObj = JSON.parse(period);\n        dateFrom = new Date(calendarObj.date_from);\n        dateFrom.setHours(0, 0, 0, 0);\n        \n        dateTo = new Date(calendarObj.date_to);\n        dateTo.setHours(23, 59, 59, 999);\n    } catch (e) {\n        // На случай непредвиденной ошибки парсинга оставим текущую дату\n        dateFrom = new Date();\n        dateTo = new Date();\n    }\n\n// --- ДЛЯ СТАРЫХ КАСТОМНЫХ ДАТ ЧЕРЕЗ ПОДЧЕРКИВАНИЕ ---\n} else if (period.includes('_')) {\n    const dates = period.split('_');\n    dateFrom = new Date(dates[0]);\n    dateFrom.setHours(0, 0, 0, 0);\n    dateTo = dates[1] ? new Date(dates[1]) : new Date(dates[0]);\n    dateTo.setHours(23, 59, 59, 999);\n}\n\n// Превращаем даты в UNIX timestamp (в секундах)\nconst toUnix = (d) => Math.floor(d.getTime() / 1000);\n\nreturn {\n    json: {\n        crm_date_from: toUnix(dateFrom),\n        crm_date_to: toUnix(dateTo)\n    }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -640,
+        32
+      ],
+      "id": "c682705d-977f-4b86-8460-80a1192ab20d",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "url": "=YOUR CRM URL ",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "date_from",
+              "value": "={{ $json.crm_date_from }}"
+            },
+            {
+              "name": "date_to",
+              "value": "={{ $json.crm_date_to }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "\"Bearer YOUR_SUPABASE_KEY_HERE\""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -512,
+        160
+      ],
+      "id": "439ad6df-ac5c-448d-9f89-d629f550b63e",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Получаем данные\nconst rawData = $input.first().json;\nconst orders = rawData.data || []; \n\n// 2. Группируем с нормализацией ключей\nconst grouped = {};\n\norders.forEach(order => {\n    if (order.items && Array.isArray(order.items)) {\n        order.items.forEach(item => {\n            // Нормализация имени: убираем лишние пробелы и приводим к одному регистру\n            // Это гарантирует, что \"Вінок\" и \"вінок \" попадут в одну группу\n            const rawName = item.product_name || \"Без назви\";\n            const name = rawName.trim(); \n            \n            if (!grouped[name]) {\n                grouped[name] = { n: name, p: 0, q: 0, r: 0 };\n            }\n            \n            // Используем Number() вместо parseFloat/parseInt для более строгого контроля\n            // и добавляем проверку, что это число, а не NaN\n            const p = Number(item.profit) || 0;\n            const q = Number(item.quantity) || 0;\n            const r = Number(item.amount) || 0;\n\n            grouped[name].p += p;\n            grouped[name].q += q;\n            grouped[name].r += r;\n        });\n    }\n});\n\n// 3. Формируем финальный массив\nconst finalProducts = Object.values(grouped);\n\n// 4. Добавляем итоговые показатели для AI, чтобы он не считал их сам\nconst totalRevenue = finalProducts.reduce((sum, item) => sum + item.r, 0);\nconst totalProfit = finalProducts.reduce((sum, item) => sum + item.p, 0);\n\nreturn [{\n    json: {\n        products: finalProducts,\n        kpi: {\n            total_profit: totalProfit.toFixed(2),\n            total_revenue: totalRevenue.toFixed(2),\n            avg_markup: totalRevenue > 0 ? ((totalProfit / totalRevenue) * 100).toFixed(2) : 0,\n            unique_count: finalProducts.length\n        }\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -384,
+        48
+      ],
+      "id": "2b353eb6-a195-43dc-9ce8-6067e7a9121a",
+      "name": "Code in JavaScript",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Ти — бізнес-аналітик. Сформуй короткий звіт для власника на основі цих даних.\n\nВАЖЛИВІ ПРАВИЛА (виконуй суворо):\n1. НІЯКИХ таблиць з символами \"|\" або \"-\".\n2. НІЯКОГО жирного тексту (символи **).\n3. Пиши тільки звичайним текстом.\n4. Довжина тексту — до 2500 символів.\n\nСТРУКТУРА ЗВІТУ:\n\nKPI:\n- Унікальних товарів: {{ $json.kpi.unique_count }}\n- Загальний прибуток: {{ $json.kpi.total_profit }} грн\n- Загальна виручка: {{ $json.kpi.total_revenue }} грн\n- Маржа: {{ $json.kpi.avg_markup }}%\n\nТОП ТОВАРІВ (назва - прибуток):\n{{ $json.products.map(p => p.n + \" - \" + p.p + \" грн\").join(\"\\n\") }}\n\nРЕКОМЕНДАЦІЇ:\nНапиши 2 короткі поради, на що звернути увагу, базуючись на цифрах. Если не получаешь данные (За цей період нічого не продали)",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -208,
+        48
+      ],
+      "id": "b3ac5a60-76ff-4012-96a2-cc50ad7e13f8",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": "groq/compound-mini",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -208,
+        304
+      ],
+      "id": "7e91bcc9-1646-4800-805b-5759a641a30a",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "sO9gtuBnRmtSPGK2",
+          "name": "Groq account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "468af0eb-62bb-451f-a6e0-0bb1f66b6b42",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "27fbeedbd52dc428134f87a6297814f7712701cd5b531a9568ae29dfdb85f248"
+  },
+  "nodeGroups": [],
+  "id": "aYzLMFyMGh79kI7m",
+  "tags": []
+}
