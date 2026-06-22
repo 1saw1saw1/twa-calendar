@@ -474,7 +474,7 @@
                     "text": "Custom data",
                     "additionalFields": {
                       "web_app": {
-                        "url": "https://1saw1saw1.github.io/n8n-telegram-KPI-ai-bot/"
+                        "url": "https://1saw1saw1.github.io/n8n-telegram-KPI-ai-bot/index.html"
                       }
                     }
                   }
